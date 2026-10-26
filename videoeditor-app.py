@@ -182,21 +182,26 @@ if uploaded_file is not None:
             final_cmd = f'ffmpeg -y -i "{rough_cut_path}" {audio_filter_str} {filter_vf_str} -c:v libx264 -pix_fmt yuv420p -preset fast "{final_output_path}"'
             subprocess.run(final_cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-            # STEP 6: Automation File Saving & Playback Presentation [1]
+                        # STEP 6: Automation File Saving & Playback Presentation
             if os.path.exists(final_output_path):
                 st.success("🔥 Master Edit Complete with Music & Visual FX!")
                 st.video(final_output_path)
                 
-                # Automatically dumps a hardcopy into a local 'final_exports' folder [1]
+                # Automatically dumps a hardcopy into a local 'final_exports' folder
                 local_exports_dir = "final_exports"
                 os.makedirs(local_exports_dir, exist_ok=True)
                 auto_save_path = os.path.join(local_exports_dir, f"AI_MASTER_{uploaded_file.name}")
                 
                 shutil.copy(final_output_path, auto_save_path)
-                st.info(f"💾 Saved a copy directly to your folder directory: `{os.path.abspath(auto_save_path)}`") [1]
+                st.info(f"💾 Saved a copy directly to your folder directory: `{os.path.abspath(auto_save_path)}`")
                 
-                # Direct Browser Download fallback button mechanism [1]
+                # Direct Browser Download fallback button mechanism
                 with open(final_output_path, "rb") as file:
                     st.download_button(
                         label="📥 Download Mastered Vlog via Browser",
                         data=file,
+                        file_name=f"AI_MASTER_{uploaded_file.name}",
+                        mime="video/mp4"
+                    )
+            else:
+                st.error("Rendering failed. Verify your source background files or rendering arguments.")
