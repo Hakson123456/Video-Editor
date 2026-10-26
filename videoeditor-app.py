@@ -14,18 +14,33 @@ st.write("Upload your raw footage to cut dull moments, enhance visuals, and auto
 UPLOAD_DIR = "temp_uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+# ---------------------------------------------------------
+# 🧠 MEMORY MANAGEMENT (Prevents losing inputs on re-runs)
+# ---------------------------------------------------------
+if "music_folder" not in st.session_state:
+    st.session_state.music_folder = "music"
+if "sensitivity" not in st.session_state:
+    st.session_state.sensitivity = 15
+if "dull_duration" not in st.session_state:
+    st.session_state.dull_duration = 1.5
+if "padding" not in st.session_state:
+    st.session_state.padding = 0.3
+
 # --- DYNAMIC MUSIC FOLDER SCANNER ---
 st.sidebar.header("🎵 Music Directory Settings")
 music_folder_path = st.sidebar.text_input(
     "Path to your Music Folder", 
-    value="music",
+    value=st.session_state.music_folder,
+    key="music_folder_input",
     help="Type 'music' to use a folder in your project directory, or paste a local path like 'C:/Users/Name/Music' on Windows."
 )
+# Save text to state immediately
+st.session_state.music_folder = music_folder_path
 
 # Look for songs inside the typed folder path
-if os.path.exists(music_folder_path):
-    available_tracks = [f for f in os.listdir(music_folder_path) if f.endswith(('.mp3', '.wav', '.m4a'))]
-    MUSIC_DIR = music_folder_path
+if os.path.exists(st.session_state.music_folder):
+    available_tracks = [f for f in os.listdir(st.session_state.music_folder) if f.endswith(('.mp3', '.wav', '.m4a'))]
+    MUSIC_DIR = st.session_state.music_folder
     if not available_tracks:
         st.sidebar.info("ℹ️ Folder found, but no .mp3 or .wav files were inside it.")
 else:
@@ -36,17 +51,34 @@ else:
 
 # Dropdown options populated by whatever is inside that folder path
 music_option = st.sidebar.selectbox("Choose Background Track", ["None"] + available_tracks)
-music_volume = st.sidebar.slider("Music Volume Level", -40, -10, -25, help="Lower means quieter music so engine/voice stands out.")
+music_volume = st.sidebar.slider("Music Volume Level", -40, -10, -25, help="Lower means quieter music.")
 
 # --- OTHER SIDEBAR CONTROLS ---
 st.sidebar.header("✂️ Cut Settings")
 volume_percentage = st.sidebar.slider(
     "Action Audio Sensitivity (%)", 
-    min_value=1, max_value=50, value=15, 
-    help="Lower percentage means a quieter engine/voice counts as 'action'. Higher means it needs to be louder."
+    min_value=1, max_value=50, 
+    value=st.session_state.sensitivity,
+    key="sensitivity_slider",
+    help="Lower percentage means a quieter engine/voice counts as 'action'."
 )
-min_silence_len_sec = st.sidebar.slider("Min Dull Duration (seconds)", 0.5, 5.0, 1.5, 0.1)
-padding_sec = st.sidebar.slider("Clip Buffer Padding (seconds)", 0.1, 1.0, 0.3, 0.1)
+st.session_state.sensitivity = volume_percentage
+
+min_silence_len_sec = st.sidebar.slider(
+    "Min Dull Duration (seconds)", 
+    0.5, 5.0, 
+    value=st.session_state.dull_duration,
+    key="dull_duration_slider"
+)
+st.session_state.dull_duration = min_silence_len_sec
+
+padding_sec = st.sidebar.slider(
+    "Clip Buffer Padding (seconds)", 
+    0.1, 1.0, 
+    value=st.session_state.padding,
+    key="padding_slider"
+)
+st.session_state.padding = padding_sec
 
 st.sidebar.header("🎬 Visual FX Filters")
 apply_saturation = st.sidebar.checkbox("Boost Color Saturation (Vibrant Ride)", value=True)
@@ -54,8 +86,8 @@ apply_vignette = st.sidebar.checkbox("Cinematic Vignette (Dark Corners)", value=
 apply_contrast = st.sidebar.checkbox("High Contrast (Deep Shadows)", value=False)
 
 
-# 1. Video Upload Component (Runs instantly when running on your local machine)
-uploaded_file = st.file_uploader("Upload your raw GoPro / Camera video (.mp4)", type=["mp4", "mov", "mkv"])
+# 1. Video Upload Component (Binds with a key parameter to preserve state context)
+uploaded_file = st.file_uploader("Upload your raw GoPro / Camera video (.mp4)", type=["mp4", "mov", "mkv"], key="video_uploader")
 
 if uploaded_file is not None:
     input_path = os.path.join(UPLOAD_DIR, uploaded_file.name)
@@ -100,7 +132,7 @@ if uploaded_file is not None:
                 
             rms_values = np.array(rms_values)
             max_rms = np.max(rms_values) if len(rms_values) > 0 else 1
-            threshold = max_rms * (volume_percentage / 100.0)
+            threshold = max_rms * (st.session_state.sensitivity / 100.0)
             
             is_action = rms_values > threshold
             action_intervals = []
@@ -116,7 +148,7 @@ if uploaded_file is not None:
                     in_action = False
                     start_ms = start_chunk * 100
                     end_ms = idx * 100
-                    if (end_ms - start_ms) >= (min_silence_len_sec * 1000):
+                    if (end_ms - start_ms) >= (st.session_state.dull_duration * 1000):
                         action_intervals.append((start_ms, end_ms))
                         
             if in_action:
@@ -132,8 +164,8 @@ if uploaded_file is not None:
                 video_duration_ms = (len(data) / sample_rate) * 1000
                 
                 for start, end in action_intervals:
-                    start_sec = max(0, start - (padding_sec * 1000)) / 1000.0
-                    end_sec = min(video_duration_ms, end + (padding_sec * 1000)) / 1000.0
+                    start_sec = max(0, start - (st.session_state.padding * 1000)) / 1000.0
+                    end_sec = min(video_duration_ms, end + (st.session_state.padding * 1000)) / 1000.0
                     duration = end_sec - start_sec
                     
                     if duration < 0.5: continue
@@ -182,26 +214,6 @@ if uploaded_file is not None:
             final_cmd = f'ffmpeg -y -i "{rough_cut_path}" {audio_filter_str} {filter_vf_str} -c:v libx264 -pix_fmt yuv420p -preset fast "{final_output_path}"'
             subprocess.run(final_cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-                        # STEP 6: Automation File Saving & Playback Presentation
+            # STEP 6: Automation File Saving & Playback Presentation
             if os.path.exists(final_output_path):
-                st.success("🔥 Master Edit Complete with Music & Visual FX!")
-                st.video(final_output_path)
-                
-                # Automatically dumps a hardcopy into a local 'final_exports' folder
-                local_exports_dir = "final_exports"
-                os.makedirs(local_exports_dir, exist_ok=True)
-                auto_save_path = os.path.join(local_exports_dir, f"AI_MASTER_{uploaded_file.name}")
-                
-                shutil.copy(final_output_path, auto_save_path)
-                st.info(f"💾 Saved a copy directly to your folder directory: `{os.path.abspath(auto_save_path)}`")
-                
-                # Direct Browser Download fallback button mechanism
-                with open(final_output_path, "rb") as file:
-                    st.download_button(
-                        label="📥 Download Mastered Vlog via Browser",
-                        data=file,
-                        file_name=f"AI_MASTER_{uploaded_file.name}",
-                        mime="video/mp4"
-                    )
-            else:
-                st.error("Rendering failed. Verify your source background files or rendering arguments.")
+
